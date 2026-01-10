@@ -28,6 +28,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     authKey: process.env.AUTH_KEY ?? '',
     authCookieName: process.env.AUTH_COOKIE_NAME ?? 'nuxtllm_auth',
+    obsidianVaultPath: process.env.OBSIDIAN_VAULT_PATH ?? '',
     public: {
       authCookieName: process.env.AUTH_COOKIE_NAME ?? 'nuxtllm_auth',
       authEnabled: Boolean(process.env.AUTH_KEY)

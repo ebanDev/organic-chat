@@ -24,6 +24,8 @@ const modelsLoading = ref(false)
 const editMessageOpen = ref(false)
 const editMessageId = ref<string | null>(null)
 const editMessageText = ref('')
+const editMessageAttachments = ref<DocumentAttachment[]>([])
+const editMessageAttachmentFiles = ref<FileList | null>(null)
 
 const STREAM_RENDER_THROTTLE_MS = 80
 const displayMessages = shallowRef<UIMessage[]>([])
@@ -33,7 +35,59 @@ let lastStreamRender = 0
 const optimisticMessage = ref<UIMessage | null>(null)
 const pendingHydrationId = ref<string | null>(null)
 
+interface DocumentAttachment {
+  name: string
+  content: string
+}
+
+interface DocumentExtractResult {
+  text: string
+  attachments: DocumentAttachment[]
+}
+
+function stripDocumentBlocks(text: string): string {
+  return extractDocumentBlocks(text).text
+}
+
+function extractDocumentBlocks(text: string): DocumentExtractResult {
+  const attachments: DocumentAttachment[] = []
+  let cleaned = text
+
+  const newPattern = /<<<DOC name="([^"]+)"\s*>>>\n([\s\S]*?)\n<<<ENDDOC>>>/g
+  cleaned = cleaned.replace(newPattern, (_match, name: string, content: string) => {
+    attachments.push({ name, content })
+    return ''
+  })
+
+  const legacyPattern = /Document:\s*(.+)\n```txt\n([\s\S]*?)\n```/g
+  cleaned = cleaned.replace(legacyPattern, (_match, name: string, content: string) => {
+    attachments.push({ name: name.trim(), content })
+    return ''
+  })
+
+  return {
+    text: cleaned.trim(),
+    attachments
+  }
+}
+
 function getMessageTextFromParts(message: UIMessage): string {
+  return message.parts
+    .filter(part => part.type === 'text' || part.type === 'reasoning')
+    .map(part => ('text' in part ? stripDocumentBlocks(part.text) : ''))
+    .join('')
+    .trim()
+}
+
+function getMessageCopyText(message: UIMessage): string {
+  return message.parts
+    .filter(part => part.type === 'text')
+    .map(part => ('text' in part ? stripDocumentBlocks(part.text) : ''))
+    .join('')
+    .trim()
+}
+
+function getRawMessageTextFromParts(message: UIMessage): string {
   return message.parts
     .filter(part => part.type === 'text' || part.type === 'reasoning')
     .map(part => ('text' in part ? part.text : ''))
@@ -154,7 +208,7 @@ function getMessageText(message: UIMessage): string {
 }
 
 async function copyMessage(message: UIMessage) {
-  const text = getMessageText(message)
+  const text = getMessageCopyText(message)
   if (!text) {
     toast.add({ title: 'Nothing to copy', color: 'error' })
     return
@@ -189,7 +243,7 @@ async function restartMessage(message: UIMessage) {
     return
   }
 
-  const text = getMessageText(target)
+  const text = getRawMessageTextFromParts(target)
   if (!text) {
     toast.add({ title: 'Nothing to restart', color: 'error' })
     return
@@ -231,20 +285,23 @@ function openEditMessage(message: UIMessage) {
     toast.add({ title: 'Only user messages can be edited', color: 'error' })
     return
   }
-  const text = getMessageText(message)
-  if (!text) {
+  const rawText = getRawMessageTextFromParts(message)
+  if (!rawText) {
     toast.add({ title: 'Nothing to edit', color: 'error' })
     return
   }
+  const extracted = extractDocumentBlocks(rawText)
   editMessageId.value = message.id
-  editMessageText.value = text
+  editMessageText.value = extracted.text
+  editMessageAttachments.value = extracted.attachments
+  editMessageAttachmentFiles.value = null
   editMessageOpen.value = true
 }
 
 async function confirmEditMessage() {
   if (!editMessageId.value) return
   const content = editMessageText.value.trim()
-  if (!content) {
+  if (!content && !editMessageAttachments.value.length) {
     toast.add({ title: 'Message cannot be empty', color: 'error' })
     return
   }
@@ -252,6 +309,10 @@ async function confirmEditMessage() {
   const messageId = editMessageId.value
   editMessageOpen.value = false
   editMessageId.value = null
+  const attachments = editMessageAttachments.value
+  editMessageAttachments.value = []
+  const attachmentFiles = editMessageAttachmentFiles.value
+  editMessageAttachmentFiles.value = null
 
   await $fetch(`/api/messages/${messageId}`, { method: 'DELETE' })
 
@@ -272,7 +333,34 @@ async function confirmEditMessage() {
     }
   }
 
-  await chat.sendMessage({ text: content })
+  let updatedAttachments = attachments
+  if (attachmentFiles) {
+    const incomingFiles = Array.from(attachmentFiles)
+    const documentFiles = incomingFiles.filter(file => !isImageFile(file))
+    if (documentFiles.length) {
+      const documentMessage = await buildDocumentsMessage(documentFiles)
+      const extracted = extractDocumentBlocks(documentMessage)
+      if (extracted.attachments.length) {
+        updatedAttachments = [...updatedAttachments, ...extracted.attachments]
+      }
+    }
+  }
+
+  const attachmentBlocks = updatedAttachments.map(item => formatDocumentBlock(item.name, item.content)).join('\n\n')
+  const nextText = [content, attachmentBlocks].filter(Boolean).join('\n\n')
+  await chat.sendMessage({ text: nextText })
+}
+
+function removeEditAttachment(index: number) {
+  editMessageAttachments.value.splice(index, 1)
+}
+
+function onEditFilesSelected(event: Event) {
+  const inputEl = event.target as HTMLInputElement
+  const files = inputEl.files
+  if (!files?.length) return
+  editMessageAttachmentFiles.value = files
+  inputEl.value = ''
 }
 
 const messageActions = [
@@ -454,6 +542,7 @@ type RenderBlock
   = | { type: 'reasoning', text: string, isStreaming: boolean }
     | { type: 'text', text: string, isStreaming: boolean }
     | { type: 'file', url: string, mediaType?: string }
+    | { type: 'document-attachment', name: string, content: string }
     | { type: 'tool-call', name: string, title?: string, payload: unknown }
     | { type: 'tool-result', name: string, title?: string, payload: unknown, preliminary?: boolean }
     | { type: 'tool-error', name: string, title?: string, payload: unknown }
@@ -514,7 +603,20 @@ function toRenderBlocks(message: UIMessage) {
     }
 
     if (part.type === 'text') {
-      blocks.push(...splitThinking(part.text, part.state === 'streaming'))
+      if (message.role === 'user') {
+        const extracted = extractDocumentBlocks(part.text)
+        const textBlocks = splitThinking(extracted.text, part.state === 'streaming')
+        blocks.push(...textBlocks)
+        extracted.attachments.forEach((attachment) => {
+          blocks.push({
+            type: 'document-attachment',
+            name: attachment.name,
+            content: attachment.content
+          })
+        })
+      } else {
+        blocks.push(...splitThinking(part.text, part.state === 'streaming'))
+      }
     }
 
     if (part.type === 'file') {
@@ -608,6 +710,16 @@ function toolHeading(type: RenderBlock['type']): string {
   }
 }
 
+const documentPreviewOpen = ref(false)
+const documentPreviewName = ref('')
+const documentPreviewContent = ref('')
+
+function openDocumentPreview(payload: { name: string, content: string }) {
+  documentPreviewName.value = payload.name
+  documentPreviewContent.value = payload.content
+  documentPreviewOpen.value = true
+}
+
 function isImageFile(file: File): boolean {
   return file.type.startsWith('image/')
 }
@@ -680,7 +792,7 @@ async function extractTextFromFile(file: File): Promise<string> {
 }
 
 function formatDocumentBlock(name: string, content: string): string {
-  return `Document: ${name}\n\`\`\`txt\n${content}\n\`\`\``
+  return `<<<DOC name="${name}">>>\n${content}\n<<<ENDDOC>>>`
 }
 
 async function buildDocumentsMessage(files: File[]): Promise<string> {
@@ -689,11 +801,7 @@ async function buildDocumentsMessage(files: File[]): Promise<string> {
   for (const file of files) {
     try {
       const text = await extractTextFromFile(file)
-      if (text.trim()) {
-        blocks.push(formatDocumentBlock(file.name, text))
-      } else {
-        toast.add({ title: 'Empty document', description: `${file.name} had no extractable text`, color: 'error' })
-      }
+      blocks.push(formatDocumentBlock(file.name, text.trim()))
     } catch (_error) {
       const message = _error instanceof Error ? _error.message : 'Failed to extract text'
       toast.add({ title: 'Document import failed', description: `${file.name}: ${message}`, color: 'error' })
@@ -703,26 +811,35 @@ async function buildDocumentsMessage(files: File[]): Promise<string> {
   return blocks.join('\n\n')
 }
 
-async function sendWithAttachments(payload: { text?: string, files?: FileList | null }) {
+interface PreparedMessagePayload {
+  text: string
+  imageFiles: File[]
+}
+
+async function prepareMessagePayload(payload: { text?: string, files?: FileList | null }): Promise<PreparedMessagePayload> {
   const text = payload.text?.trim() || ''
   const incomingFiles = payload.files ? Array.from(payload.files) : []
   const imageFiles = incomingFiles.filter(isImageFile)
   const documentFiles = incomingFiles.filter(file => !isImageFile(file))
   const documentMessage = documentFiles.length ? await buildDocumentsMessage(documentFiles) : ''
+  const combinedText = [text, documentMessage].filter(Boolean).join('\n\n')
 
-  if (text && imageFiles.length) {
-    await chat.sendMessage({
-      text,
-      files: toFileList(imageFiles)
-    })
-  } else if (text) {
-    await chat.sendMessage({ text })
-  } else if (imageFiles.length) {
-    await chat.sendMessage({ files: toFileList(imageFiles) })
+  return {
+    text: combinedText,
+    imageFiles
   }
+}
 
-  if (documentMessage) {
-    await chat.sendMessage({ text: documentMessage })
+async function sendWithAttachments(payload: PreparedMessagePayload) {
+  if (payload.text && payload.imageFiles.length) {
+    await chat.sendMessage({
+      text: payload.text,
+      files: toFileList(payload.imageFiles)
+    })
+  } else if (payload.text) {
+    await chat.sendMessage({ text: payload.text })
+  } else if (payload.imageFiles.length) {
+    await chat.sendMessage({ files: toFileList(payload.imageFiles) })
   }
 }
 
@@ -763,7 +880,9 @@ async function onSubmit(payload: { text: string, files: FileList | null }) {
     model: selectedModel.value
   })
 
-  const optimisticText = payload.text?.trim()
+  const preparedPayload = await prepareMessagePayload(payload)
+  const optimisticText = preparedPayload.text.trim()
+
   if (optimisticText) {
     optimisticMessage.value = {
       id: `optimistic-${crypto.randomUUID()}`,
@@ -782,7 +901,7 @@ async function onSubmit(payload: { text: string, files: FileList | null }) {
     return
   }
   try {
-    await sendWithAttachments(payload)
+    await sendWithAttachments(preparedPayload)
   } finally {
     if (!chat.messages.length) {
       optimisticMessage.value = null
@@ -845,10 +964,12 @@ async function initializeConversation(id: string) {
   if (pending) {
     pendingMessage.value = null
     pendingFiles.value = null
-    await sendWithAttachments({ text: pending, files: queuedFiles })
+    const preparedPayload = await prepareMessagePayload({ text: pending, files: queuedFiles })
+    await sendWithAttachments(preparedPayload)
   } else if (queuedFiles) {
     pendingFiles.value = null
-    await sendWithAttachments({ files: queuedFiles })
+    const preparedPayload = await prepareMessagePayload({ files: queuedFiles })
+    await sendWithAttachments(preparedPayload)
   }
 }
 
@@ -972,6 +1093,20 @@ watch(
                     :icon="block.mediaType?.startsWith('image/') ? undefined : 'ph:file-bold'"
                     class="border border-default rounded-lg"
                   />
+                  <UButton
+                    v-else-if="block.type === 'document-attachment'"
+                    size="sm"
+                    variant="soft"
+                    color="neutral"
+                    class="inline-flex items-center gap-2 mt-2 mr-2"
+                    @click="openDocumentPreview({ name: block.name, content: block.content })"
+                  >
+                    <UIcon
+                      name="ph:file-text-bold"
+                      class="text-base"
+                    />
+                    <span class="truncate max-w-[16rem]">{{ block.name }}</span>
+                  </UButton>
                   <UAccordion
                     v-else-if="block.type === 'tool-call'"
                     :items="[{ label: block.title || block.name, icon: toolIcon(block.type) }]"
@@ -1073,6 +1208,49 @@ watch(
             v-model="editMessageText"
             :rows="6"
           />
+          <div class="mt-3 space-y-2">
+            <div
+              v-if="editMessageAttachments.length"
+              class="flex flex-wrap gap-2"
+            >
+              <UButton
+                v-for="(item, index) in editMessageAttachments"
+                :key="`${item.name}-${index}`"
+                size="xs"
+                variant="soft"
+                color="neutral"
+                class="inline-flex items-center gap-2"
+                @click="removeEditAttachment(index)"
+              >
+                <UIcon
+                  name="ph:file-text-bold"
+                  class="text-base"
+                />
+                <span class="truncate max-w-[12rem]">{{ item.name }}</span>
+                <UIcon
+                  name="ph:x-bold"
+                  class="text-xs"
+                />
+              </UButton>
+            </div>
+            <label class="cursor-pointer">
+              <UButton
+                icon="ph:paperclip-bold"
+                variant="ghost"
+                color="neutral"
+                size="xs"
+                as="span"
+              >
+                Add attachment
+              </UButton>
+              <input
+                type="file"
+                multiple
+                class="hidden"
+                @change="onEditFilesSelected"
+              >
+            </label>
+          </div>
           <template #footer>
             <div class="flex justify-end gap-2">
               <UButton
@@ -1087,6 +1265,19 @@ watch(
               </UButton>
             </div>
           </template>
+        </UCard>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="documentPreviewOpen">
+      <template #content>
+        <UCard>
+          <template #header>
+            <h2 class="text-lg font-semibold">
+              {{ documentPreviewName }}
+            </h2>
+          </template>
+          <pre class="text-sm whitespace-pre-wrap">{{ documentPreviewContent }}</pre>
         </UCard>
       </template>
     </UModal>

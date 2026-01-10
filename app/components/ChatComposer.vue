@@ -44,6 +44,8 @@ const emit = defineEmits<{
 
 const input = ref('')
 const selectedFiles = ref<Array<{ file: File, previewUrl?: string }>>([])
+const mentionPickerRef = ref<{ selectFirstMatch?: () => boolean } | null>(null)
+const promptRef = ref<{ $el?: HTMLElement } | null>(null)
 
 function isImageFile(file: File): boolean {
   return file.type.startsWith('image/')
@@ -108,6 +110,11 @@ function removeFile(index: number) {
 }
 
 function handleSubmit() {
+  const mentionQuery = input.value.match(/(?:^|\s)@([^\s@]*)$/)
+  if (mentionQuery) {
+    const applied = mentionPickerRef.value?.selectFirstMatch?.()
+    if (applied) return
+  }
   const text = input.value.trim()
   const files = selectedFiles.value.map(item => item.file)
   if (!text && !files.length) return
@@ -128,10 +135,24 @@ function handleSubmit() {
   })
   selectedFiles.value = []
 }
+
+function focusPromptInput() {
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const root = promptRef.value?.$el
+      const inputEl = root?.querySelector('textarea, input')
+      if (inputEl instanceof HTMLTextAreaElement || inputEl instanceof HTMLInputElement) {
+        inputEl.focus()
+      }
+    })
+  })
+}
+
 </script>
 
 <template>
   <UChatPrompt
+    ref="promptRef"
     v-model="input"
     placeholder="Send a message..."
     :error="error"
@@ -139,11 +160,11 @@ function handleSubmit() {
     @submit="handleSubmit"
     @paste="onPaste"
   >
-    <template
-      v-if="selectedFiles.length"
-      #header
-    >
-      <div class="flex flex-wrap gap-2">
+    <template #header>
+      <div
+        v-if="selectedFiles.length"
+        class="flex flex-wrap gap-2"
+      >
         <div
           v-for="(item, index) in selectedFiles"
           :key="item.previewUrl || `${item.file.name}-${item.file.lastModified}`"
@@ -180,6 +201,23 @@ function handleSubmit() {
           />
         </div>
       </div>
+      <ObsidianVaultPicker
+        v-model="input"
+        :disabled="disabled"
+        class="mt-2"
+        @attach="addFiles"
+        @request-focus="focusPromptInput"
+      />
+      <AgentMentionPicker
+        v-model="input"
+        :agents="agents"
+        :agent-value="agentValue"
+        :disabled="disabled"
+        class="mt-2"
+        ref="mentionPickerRef"
+        @update:agent-value="emit('update:agentValue', $event)"
+        @request-focus="focusPromptInput"
+      />
     </template>
 
     <template #footer>

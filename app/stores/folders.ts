@@ -43,12 +43,15 @@ export const useFoldersStore = defineStore('folders', () => {
     }
   }
 
-  async function remove(id: string) {
+  async function remove(id: string, action: 'keep_chats' | 'delete_chats' = 'keep_chats') {
     const existing = folders.value.find(folder => folder.id === id)
     folders.value = folders.value.filter(folder => folder.id !== id)
     if (!existing) return
     try {
-      await $fetch(`/api/folders/${id}`, { method: 'DELETE' })
+      await $fetch(`/api/folders/${id}`, {
+        method: 'DELETE',
+        params: { action }
+      })
     } catch (error) {
       folders.value = [existing, ...folders.value]
       throw error

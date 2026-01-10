@@ -111,6 +111,10 @@ const showFolderForm = ref(false)
 const folderName = ref('')
 const creatingFolder = ref(false)
 const openFolders = ref<Record<string, boolean>>({})
+const deleteFolderOpen = ref(false)
+const deleteFolderId = ref<string | null>(null)
+const deleteFolderName = ref('')
+const deleteFolderCount = ref(0)
 
 async function runSearch(term: string) {
   searching.value = true
@@ -164,6 +168,41 @@ function buildMenuItems(conversations: Conversation[]): ChatMenuItem[] {
 const unfiledMenuItems = computed<ChatMenuItem[]>(() =>
   buildMenuItems(unfiledConversations.value)
 )
+
+function getFolderConversationCount(folderId: string): number {
+  return conversations.value.filter(conv => conv.folderId === folderId).length
+}
+
+async function confirmDeleteFolder(folderId: string) {
+  const folder = folders.value.find(item => item.id === folderId)
+  if (!folder) return
+  const count = getFolderConversationCount(folderId)
+  if (!count) {
+    await foldersStore.remove(folderId, 'keep_chats')
+    await conversationsStore.load()
+    return
+  }
+  deleteFolderId.value = folderId
+  deleteFolderName.value = folder.name
+  deleteFolderCount.value = count
+  deleteFolderOpen.value = true
+}
+
+async function deleteFolderAndKeepChats() {
+  if (!deleteFolderId.value) return
+  await foldersStore.remove(deleteFolderId.value, 'keep_chats')
+  deleteFolderOpen.value = false
+  deleteFolderId.value = null
+  await conversationsStore.load()
+}
+
+async function deleteFolderAndChats() {
+  if (!deleteFolderId.value) return
+  await foldersStore.remove(deleteFolderId.value, 'delete_chats')
+  deleteFolderOpen.value = false
+  deleteFolderId.value = null
+  await conversationsStore.load()
+}
 
 const appMenuItems = computed<NavigationMenuItem[]>(() =>
   apps.value.map(app => ({
@@ -492,22 +531,31 @@ const searchGroups = computed(() => {
               <div
                 v-for="folder in folders"
                 :key="folder.id"
-                class=""
               >
+                <div class="relative flex items-center group">
                 <UButton
                   color="neutral"
                   variant="ghost"
                   size="md"
-                  class="w-full justify-start gap-2 text-sm"
+                  class="flex-1 justify-start gap-2 text-sm pr-2 group-hover:pr-8 transition-[padding]"
                   @click="toggleFolder(folder.id)"
                 >
-                  <UIcon name="ph:folder-simple-bold" />
-                  <span class="truncate">{{ folder.name }}</span>
-                  <UIcon
-                    :name="isFolderOpen(folder.id) ? 'ph:caret-down-bold' : 'ph:caret-right-bold'"
-                    class="ml-auto"
+                    <UIcon name="ph:folder-simple-bold" />
+                    <span class="truncate">{{ folder.name }}</span>
+                    <UIcon
+                      :name="isFolderOpen(folder.id) ? 'ph:caret-down-bold' : 'ph:caret-right-bold'"
+                      class="ml-auto"
+                    />
+                  </UButton>
+                  <UButton
+                    icon="ph:trash-bold"
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    class="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                    @click.stop="confirmDeleteFolder(folder.id)"
                   />
-                </UButton>
+                </div>
                 <div
                   v-show="isFolderOpen(folder.id)"
                   class="mt-1 border-l border-secondary-300 pl-3 ml-2"
@@ -598,6 +646,49 @@ const searchGroups = computed(() => {
           </UButton>
         </template>
       </UDashboardSidebar>
+
+      <UModal v-model:open="deleteFolderOpen">
+        <template #content>
+          <UCard>
+            <template #header>
+              <h2 class="text-lg font-semibold">
+                Delete folder
+              </h2>
+            </template>
+            <p class="text-sm text-muted">
+              "{{ deleteFolderName }}" has {{ deleteFolderCount }} chat{{ deleteFolderCount === 1 ? '' : 's' }}.
+            </p>
+            <p class="text-sm text-muted mt-2">
+              Do you want to move them to global chats or delete them?
+            </p>
+            <template #footer>
+              <div class="flex justify-end gap-2">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  @click="deleteFolderOpen = false"
+                >
+                  Cancel
+                </UButton>
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  @click="deleteFolderAndKeepChats"
+                >
+                  Move to chats
+                </UButton>
+                <UButton
+                  color="error"
+                  variant="solid"
+                  @click="deleteFolderAndChats"
+                >
+                  Delete chats
+                </UButton>
+              </div>
+            </template>
+          </UCard>
+        </template>
+      </UModal>
 
       <UDashboardSearch
         v-model:open="searchOpen"
