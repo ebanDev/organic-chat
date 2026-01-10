@@ -23,8 +23,7 @@ function resolveMimeType(extension: string): string {
 }
 
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig()
-  const vaultPath = config.obsidianVaultPath
+  const vaultPath = process.env.OBSIDIAN_VAULT_PATH ?? ''
   if (!vaultPath) {
     throw createError({
       statusCode: 400,

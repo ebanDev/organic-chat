@@ -17,6 +17,8 @@ async function searchVault(root: string, query: string): Promise<ObsidianSearchR
   const stack = [root]
   const needle = normalizeSearchValue(query)
   if (!needle) return results
+  let scanned = 0
+  let matched = 0
 
   while (stack.length && results.length < MAX_RESULTS) {
     const current = stack.pop()
@@ -39,6 +41,7 @@ async function searchVault(root: string, query: string): Promise<ObsidianSearchR
       }
       if (entry.isSymbolicLink()) continue
       if (!entry.isFile()) continue
+      scanned += 1
       const extension = extname(entryName).toLowerCase()
       if (extension !== '.md') continue
       const base = basename(entryName, extension)
@@ -50,6 +53,7 @@ async function searchVault(root: string, query: string): Promise<ObsidianSearchR
         relativePath: relative(root, fullPath),
         extension
       })
+      matched += 1
     }
   }
 
@@ -125,6 +129,7 @@ function limitedLevenshtein(a: string, b: string, maxDistance: number): number |
 async function getRecentFiles(root: string): Promise<ObsidianSearchResult[]> {
   const stack = [root]
   const candidates: ObsidianSearchResult[] = []
+  let scanned = 0
 
   while (stack.length) {
     const current = stack.pop()
@@ -146,6 +151,7 @@ async function getRecentFiles(root: string): Promise<ObsidianSearchResult[]> {
       }
       if (entry.isSymbolicLink()) continue
       if (!entry.isFile()) continue
+      scanned += 1
       const extension = extname(entryName).toLowerCase()
       if (extension !== '.md') continue
       let stats
@@ -169,8 +175,8 @@ async function getRecentFiles(root: string): Promise<ObsidianSearchResult[]> {
 }
 
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig()
-  const vaultPath = config.obsidianVaultPath
+  const requestId = crypto.randomUUID()
+  const vaultPath = process.env.OBSIDIAN_VAULT_PATH ?? ''
   if (!vaultPath) {
     throw createError({
       statusCode: 400,
