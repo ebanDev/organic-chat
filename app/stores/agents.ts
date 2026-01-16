@@ -1,4 +1,4 @@
-import type { Agent } from '~/types'
+import type { Agent, AgentKnowledgeBase } from '~/types'
 
 export const useAgentsStore = defineStore('agents', () => {
   const agents = ref<Agent[]>([])
@@ -104,7 +104,24 @@ export const useAgentsStore = defineStore('agents', () => {
     activeId.value = id
   }
 
-  return { agents, activeId, active, loading, load, create, update, remove, setActive }
+  async function loadKnowledgeBase(agentId: string) {
+    return await $fetch<AgentKnowledgeBase[]>(`/api/agents/${agentId}/knowledge`)
+  }
+
+  async function addKnowledgeFile(agentId: string, filePath: string) {
+    return await $fetch<AgentKnowledgeBase>(`/api/agents/${agentId}/knowledge`, {
+      method: 'POST',
+      body: { filePath }
+    })
+  }
+
+  async function removeKnowledgeFile(agentId: string, kbId: string) {
+    await $fetch(`/api/agents/${agentId}/knowledge/${kbId}`, {
+      method: 'DELETE'
+    })
+  }
+
+  return { agents, activeId, active, loading, load, create, update, remove, setActive, loadKnowledgeBase, addKnowledgeFile, removeKnowledgeFile }
 }, {
   persist: true
 })

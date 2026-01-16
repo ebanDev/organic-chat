@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import type { Agent, ToolPack } from '~/types'
+import type { Agent, ToolPack, AgentKnowledgeBase } from '~/types'
 
 definePageMeta({
   layout: 'settings'
@@ -19,6 +19,11 @@ const isAddAgentModalOpen = ref(false)
 const isEditAgentModalOpen = ref(false)
 const editingAgent = ref<Agent | null>(null)
 const editWebDefault = ref(false)
+const knowledgeBaseFiles = ref<AgentKnowledgeBase[]>([])
+const knowledgeBaseLoading = ref(false)
+const obsidianSearchQuery = ref('')
+const obsidianSearchResults = ref<{ name: string, relativePath: string }[]>([])
+const obsidianSearchLoading = ref(false)
 const models = ref<Record<string, string[]>>({})
 const modelsLoading = ref(false)
 const defaultAgentId = computed<string | undefined>({
@@ -109,6 +114,73 @@ function openEditAgent(agent: Agent) {
   const defaults = settingsStore.getAssistantToolDefaults(agent.id)
   editWebDefault.value = defaults.includes('web_navigate')
   isEditAgentModalOpen.value = true
+  loadKnowledgeBase(agent.id)
+}
+
+async function loadKnowledgeBase(agentId: string) {
+  knowledgeBaseLoading.value = true
+  try {
+    knowledgeBaseFiles.value = await agentsStore.loadKnowledgeBase(agentId)
+  } catch {
+    toast.add({ title: 'Failed to load knowledge base', color: 'error' })
+  } finally {
+    knowledgeBaseLoading.value = false
+  }
+}
+
+async function searchObsidianFiles() {
+  if (!obsidianSearchQuery.value.trim()) {
+    obsidianSearchResults.value = []
+    return
+  }
+
+  obsidianSearchLoading.value = true
+  try {
+    const response = await $fetch<{ results: { name: string, relativePath: string }[] }>('/api/obsidian/search', {
+      query: { q: obsidianSearchQuery.value.trim() }
+    })
+    obsidianSearchResults.value = response.results
+  } catch (error: unknown) {
+    const statusCode = error && typeof error === 'object' && 'statusCode' in error ? error.statusCode : null
+    if (statusCode === 400) {
+      toast.add({ title: 'Obsidian vault not configured', description: 'Please set OBSIDIAN_VAULT_PATH environment variable', color: 'warning' })
+    } else {
+      toast.add({ title: 'Failed to search files', color: 'error' })
+    }
+  } finally {
+    obsidianSearchLoading.value = false
+  }
+}
+
+async function addKnowledgeFile(filePath: string) {
+  if (!editingAgent.value) return
+
+  try {
+    const added = await agentsStore.addKnowledgeFile(editingAgent.value.id, filePath)
+    knowledgeBaseFiles.value = [added, ...knowledgeBaseFiles.value]
+    obsidianSearchQuery.value = ''
+    obsidianSearchResults.value = []
+    toast.add({ title: 'File attached', color: 'success' })
+  } catch (error: unknown) {
+    const statusCode = error && typeof error === 'object' && 'statusCode' in error ? error.statusCode : null
+    if (statusCode === 409) {
+      toast.add({ title: 'File already attached', color: 'warning' })
+    } else {
+      toast.add({ title: 'Failed to attach file', color: 'error' })
+    }
+  }
+}
+
+async function removeKnowledgeFile(kbId: string) {
+  if (!editingAgent.value) return
+
+  try {
+    await agentsStore.removeKnowledgeFile(editingAgent.value.id, kbId)
+    knowledgeBaseFiles.value = knowledgeBaseFiles.value.filter(f => f.id !== kbId)
+    toast.add({ title: 'File removed', color: 'success' })
+  } catch {
+    toast.add({ title: 'Failed to remove file', color: 'error' })
+  }
 }
 
 async function updateAgent() {
@@ -181,6 +253,14 @@ watch(() => providers.value, (list) => {
   }
   loadAllModels()
 }, { immediate: true })
+
+watch(obsidianSearchQuery, () => {
+  if (obsidianSearchQuery.value.trim()) {
+    searchObsidianFiles()
+  } else {
+    obsidianSearchResults.value = []
+  }
+})
 </script>
 
 <template>
@@ -415,6 +495,92 @@ watch(() => providers.value, (list) => {
                   v-model="editWebDefault"
                   label="Web tools enabled by default"
                 />
+              </div>
+            </UFormField>
+
+            <UFormField label="Knowledge Base">
+              <template #hint>
+                Attach Obsidian documents that will be included in every chat context.
+              </template>
+              <div class="space-y-3">
+                <div class="flex gap-2">
+                  <UInput
+                    v-model="obsidianSearchQuery"
+                    placeholder="Search Obsidian files..."
+                    class="flex-1"
+                    @keyup.enter="searchObsidianFiles"
+                  />
+                  <UButton
+                    icon="ph:magnifying-glass-bold"
+                    :loading="obsidianSearchLoading"
+                    @click="searchObsidianFiles"
+                  >
+                    Search
+                  </UButton>
+                </div>
+
+                <div
+                  v-if="obsidianSearchResults.length"
+                  class="border rounded-md divide-y max-h-48 overflow-y-auto"
+                >
+                  <button
+                    v-for="result in obsidianSearchResults"
+                    :key="result.relativePath"
+                    class="w-full px-3 py-2 text-left hover:bg-muted/50 transition-colors text-sm"
+                    @click="addKnowledgeFile(result.relativePath)"
+                  >
+                    <div class="font-medium">
+                      {{ result.name }}
+                    </div>
+                    <div class="text-xs text-muted">
+                      {{ result.relativePath }}
+                    </div>
+                  </button>
+                </div>
+
+                <div
+                  v-if="knowledgeBaseLoading"
+                  class="flex justify-center py-4"
+                >
+                  <UIcon
+                    name="ph:spinner-bold"
+                    class="animate-spin text-xl"
+                  />
+                </div>
+
+                <div
+                  v-else-if="knowledgeBaseFiles.length"
+                  class="space-y-2"
+                >
+                  <div class="text-xs font-medium text-muted">
+                    Attached Files
+                  </div>
+                  <div class="border rounded-md divide-y">
+                    <div
+                      v-for="file in knowledgeBaseFiles"
+                      :key="file.id"
+                      class="flex items-center justify-between px-3 py-2 text-sm"
+                    >
+                      <div class="flex-1 truncate">
+                        {{ file.filePath }}
+                      </div>
+                      <UButton
+                        icon="ph:trash-bold"
+                        color="neutral"
+                        variant="ghost"
+                        size="xs"
+                        @click="removeKnowledgeFile(file.id)"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  v-else
+                  class="text-sm text-muted text-center py-4"
+                >
+                  No files attached yet
+                </div>
               </div>
             </UFormField>
           </div>

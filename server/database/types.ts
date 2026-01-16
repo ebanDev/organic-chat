@@ -74,6 +74,13 @@ export interface Tool {
   updatedAt: number
 }
 
+export interface AgentKnowledgeBase {
+  id: string
+  agentId: string
+  filePath: string
+  createdAt: number
+}
+
 export interface ProviderRow {
   id: string
   name: string
@@ -148,6 +155,13 @@ export interface MemoryRow {
   source: string
   created_at: number
   updated_at: number
+}
+
+export interface AgentKnowledgeBaseRow {
+  id: string
+  agent_id: string
+  file_path: string
+  created_at: number
 }
 
 export function rowToConversation(row: ConversationRow): Conversation {
@@ -239,5 +253,14 @@ export function rowToTool(row: ToolRow): Tool {
     enabled: Boolean(row.enabled),
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  }
+}
+
+export function rowToAgentKnowledgeBase(row: AgentKnowledgeBaseRow): AgentKnowledgeBase {
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    filePath: row.file_path,
+    createdAt: row.created_at
   }
 }
