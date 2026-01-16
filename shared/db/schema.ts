@@ -86,6 +86,13 @@ export const baseSchemaSql = `
 
   ${memoriesTableSql('memories')}
 
+  CREATE TABLE IF NOT EXISTS agent_knowledge_base (
+    id TEXT PRIMARY KEY NOT NULL,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT 0
+  );
+
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL DEFAULT ''
@@ -94,6 +101,7 @@ export const baseSchemaSql = `
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_tools_type_enabled ON tools(type, enabled);
+  CREATE INDEX IF NOT EXISTS idx_agent_knowledge_agent ON agent_knowledge_base(agent_id);
   ${memoriesIndexSql('memories', 'idx_memories_updated')}
 `
 

@@ -79,3 +79,10 @@ export interface Memory {
   createdAt: number
   updatedAt: number
 }
+
+export interface AgentKnowledgeBase {
+  id: string
+  agentId: string
+  filePath: string
+  createdAt: number
+}

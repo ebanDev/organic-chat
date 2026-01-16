@@ -6,6 +6,7 @@ import { resolveProviderBaseUrl, openAIStreamFilterFetch } from '../utils/provid
 import { getMemoryPrompt, getTitlePrompt } from '../utils/prompts'
 import { createWebTools } from '../tools/web-tools'
 import { formatMemoryContext, getMemorySettings, insertMemories, searchMemories } from '../utils/memory'
+import { loadAgentKnowledgeBase, formatKnowledgeBaseContext } from '../utils/knowledge'
 import type { AgentRow, ProviderRow, ConversationRow, ToolRow } from '../database/types'
 import { z } from 'zod'
 
@@ -150,6 +151,18 @@ export default defineEventHandler(async (event) => {
   const systemPrompt = systemPromptRaw
     ? applyPromptVariables(systemPromptRaw, body.timeZone)
     : ''
+
+  const knowledgeBaseContext = agent?.id
+    ? formatKnowledgeBaseContext(await loadAgentKnowledgeBase(agent.id).catch((error) => {
+        console.warn('[chat] knowledge base load failed', {
+          conversationId: body.conversationId,
+          agentId: agent.id,
+          message: error instanceof Error ? error.message : String(error)
+        })
+        return []
+      }))
+    : ''
+
   const memorySettingsStart = Date.now()
   const memorySettings = await getMemorySettings()
   console.info('[memory] settings load', { ms: Date.now() - memorySettingsStart })
@@ -169,6 +182,12 @@ export default defineEventHandler(async (event) => {
     systemMessages.push({
       role: 'system',
       parts: [{ type: 'text', text: systemPrompt }]
+    })
+  }
+  if (knowledgeBaseContext) {
+    systemMessages.push({
+      role: 'system',
+      parts: [{ type: 'text', text: knowledgeBaseContext }]
     })
   }
   if (memoryContext) {
