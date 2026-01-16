@@ -24,6 +24,9 @@ interface ChatComposerProps {
   error?: Error
   tools?: Tool[]
   activeTools?: ToolPack[]
+  initialText?: string
+  initialFiles?: File[]
+  isEditing?: boolean
 }
 
 const props = withDefaults(defineProps<ChatComposerProps>(), {
@@ -33,13 +36,17 @@ const props = withDefaults(defineProps<ChatComposerProps>(), {
   agentValue: '',
   agents: () => [],
   tools: () => [],
-  activeTools: () => []
+  activeTools: () => [],
+  initialText: '',
+  initialFiles: () => [],
+  isEditing: false
 })
 
 const emit = defineEmits<{
   (event: 'update:modelValue' | 'update:agentValue', value: string): void
   (event: 'update:activeTools', value: ToolPack[]): void
-  (event: 'submit', payload: { text: string, files: FileList | null }): void
+  (event: 'submit', payload: { text: string, files: File[] | null }): void
+  (event: 'cancel'): void
 }>()
 
 const input = ref('')
@@ -119,12 +126,9 @@ function handleSubmit() {
   const files = selectedFiles.value.map(item => item.file)
   if (!text && !files.length) return
 
-  const dataTransfer = new DataTransfer()
-  files.forEach(file => dataTransfer.items.add(file))
-
   emit('submit', {
     text,
-    files: files.length ? dataTransfer.files : null
+    files: files.length ? files : null
   })
 
   input.value = ''
@@ -134,6 +138,17 @@ function handleSubmit() {
     }
   })
   selectedFiles.value = []
+}
+
+function handleCancel() {
+  input.value = ''
+  selectedFiles.value.forEach((item) => {
+    if (item.previewUrl) {
+      URL.revokeObjectURL(item.previewUrl)
+    }
+  })
+  selectedFiles.value = []
+  emit('cancel')
 }
 
 function focusPromptInput() {
@@ -148,6 +163,26 @@ function focusPromptInput() {
   })
 }
 
+// Initialize input and files when props change
+watch(() => props.initialText, (value) => {
+  if (value) {
+    input.value = value
+  }
+}, { immediate: true })
+
+watch(() => props.initialFiles, (files) => {
+  if (files && files.length > 0) {
+    selectedFiles.value.forEach((item) => {
+      if (item.previewUrl) {
+        URL.revokeObjectURL(item.previewUrl)
+      }
+    })
+    selectedFiles.value = files.map(file => ({
+      file,
+      previewUrl: isImageFile(file) ? URL.createObjectURL(file) : undefined
+    }))
+  }
+}, { immediate: true })
 </script>
 
 <template>
@@ -161,6 +196,25 @@ function focusPromptInput() {
     @paste="onPaste"
   >
     <template #header>
+      <div
+        v-if="isEditing"
+        class="flex items-center justify-between px-3 py-2 bg-primary/10 rounded-lg mb-2"
+      >
+        <div class="flex items-center gap-2">
+          <UIcon
+            name="ph:pencil-bold"
+            class="text-primary"
+          />
+          <span class="text-sm font-medium text-primary">Editing message</span>
+        </div>
+        <UButton
+          icon="ph:x-bold"
+          size="xs"
+          variant="ghost"
+          color="neutral"
+          @click="handleCancel"
+        />
+      </div>
       <div
         v-if="selectedFiles.length"
         class="flex flex-wrap gap-2"
@@ -209,12 +263,12 @@ function focusPromptInput() {
         @request-focus="focusPromptInput"
       />
       <AgentMentionPicker
+        ref="mentionPickerRef"
         v-model="input"
         :agents="agents"
         :agent-value="agentValue"
         :disabled="disabled"
         class="mt-2"
-        ref="mentionPickerRef"
         @update:agent-value="emit('update:agentValue', $event)"
         @request-focus="focusPromptInput"
       />

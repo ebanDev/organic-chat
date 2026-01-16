@@ -128,7 +128,7 @@ async function loadModels() {
   }
 }
 
-async function onSubmit(payload: { text: string, files: FileList | null }) {
+async function onSubmit(payload: { text: string, files: FileList | File[] | null }) {
   if (!payload.text && !payload.files) return
   if (modelsLoading.value) return
   if (!selectedModelKey.value) {
@@ -157,7 +157,16 @@ async function onSubmit(payload: { text: string, files: FileList | null }) {
   })
   conversationsStore.setActive(conversation.id)
   pendingMessage.value = message || null
-  pendingFiles.value = files
+
+  // Convert File[] to FileList if needed
+  if (files && Array.isArray(files)) {
+    const dataTransfer = new DataTransfer()
+    files.forEach(file => dataTransfer.items.add(file))
+    pendingFiles.value = dataTransfer.files
+  } else {
+    pendingFiles.value = files
+  }
+
   pendingTools.value = activeTools.value
   await router.push(`/chat/${conversation.id}`)
 }
