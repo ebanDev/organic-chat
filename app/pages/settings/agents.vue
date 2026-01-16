@@ -140,8 +140,13 @@ async function searchObsidianFiles() {
       query: { q: obsidianSearchQuery.value.trim() }
     })
     obsidianSearchResults.value = response.results
-  } catch {
-    toast.add({ title: 'Failed to search files', color: 'error' })
+  } catch (error: unknown) {
+    const statusCode = error && typeof error === 'object' && 'statusCode' in error ? error.statusCode : null
+    if (statusCode === 400) {
+      toast.add({ title: 'Obsidian vault not configured', description: 'Please set OBSIDIAN_VAULT_PATH environment variable', color: 'warning' })
+    } else {
+      toast.add({ title: 'Failed to search files', color: 'error' })
+    }
   } finally {
     obsidianSearchLoading.value = false
   }

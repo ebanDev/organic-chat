@@ -28,7 +28,7 @@ export async function loadAgentKnowledgeBase(agentId: string): Promise<Knowledge
   for (const row of rows) {
     try {
       const resolvedFile = resolve(resolvedRoot, row.file_path)
-      if (resolvedFile !== resolvedRoot && !resolvedFile.startsWith(`${resolvedRoot}${sep}`)) {
+      if (!resolvedFile.startsWith(`${resolvedRoot}${sep}`)) {
         console.warn('[knowledge] skipping invalid file path', { filePath: row.file_path })
         continue
       }

@@ -24,16 +24,17 @@ export default defineEventHandler(async (event) => {
 
   const id = crypto.randomUUID()
   const now = Date.now()
+  const filePath = body.filePath.trim()
 
   await run(
     'INSERT INTO agent_knowledge_base (id, agent_id, file_path, created_at) VALUES (?, ?, ?, ?)',
-    [id, agentId, body.filePath.trim(), now]
+    [id, agentId, filePath, now]
   )
 
-  const row = await query('SELECT * FROM agent_knowledge_base WHERE id = ?').get<AgentKnowledgeBaseRow>(id)
-  if (!row) {
-    throw createError({ statusCode: 500, message: 'Failed to attach file' })
-  }
-
-  return rowToAgentKnowledgeBase(row)
+  return rowToAgentKnowledgeBase({
+    id,
+    agent_id: agentId,
+    file_path: filePath,
+    created_at: now
+  })
 })
