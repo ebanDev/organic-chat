@@ -110,6 +110,14 @@ export default defineAppConfig({
         body: 'py-2'
       }
     },
+    chatMessage: {
+      slots: {
+        actions: [
+          'opacity-100 sm:opacity-0 sm:group-hover/message:opacity-100 absolute bottom-0 flex items-center',
+          'transition-opacity'
+        ]
+      }
+    },
     textarea: {
       slots: {
         root: 'w-full'
