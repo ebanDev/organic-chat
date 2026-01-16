@@ -10,6 +10,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const hydrated = ref(false)
 
   async function load() {
+    let shouldBackfillDefaults = false
     try {
       const data = await $fetch<{
         defaultModel: string | null
@@ -17,16 +18,29 @@ export const useSettingsStore = defineStore('settings', () => {
         memoryModel: string | null
         defaultAgentId: string | null
         savedModels: string[]
+        assistantToolDefaults: Record<string, ToolPack[]>
       }>('/api/settings')
       defaultModel.value = data.defaultModel ?? null
       titleModel.value = data.titleModel ?? null
       memoryModel.value = data.memoryModel ?? null
       defaultAgentId.value = data.defaultAgentId ?? null
       savedModels.value = Array.isArray(data.savedModels) ? data.savedModels : []
+      const serverDefaults = data.assistantToolDefaults ?? {}
+      const serverHasDefaults = Object.keys(serverDefaults).length > 0
+      if (serverHasDefaults) {
+        assistantToolDefaults.value = serverDefaults
+      } else if (!Object.keys(assistantToolDefaults.value).length) {
+        assistantToolDefaults.value = serverDefaults
+      } else {
+        shouldBackfillDefaults = true
+      }
     } catch {
       // Keep local cache when offline.
     } finally {
       hydrated.value = true
+      if (shouldBackfillDefaults) {
+        await persist({ assistantToolDefaults: assistantToolDefaults.value })
+      }
     }
   }
 
@@ -36,6 +50,7 @@ export const useSettingsStore = defineStore('settings', () => {
     memoryModel?: string | null
     defaultAgentId?: string | null
     savedModels?: string[]
+    assistantToolDefaults?: Record<string, ToolPack[]>
   }) {
     if (!hydrated.value) return
     try {
@@ -73,6 +88,7 @@ export const useSettingsStore = defineStore('settings', () => {
       ...assistantToolDefaults.value,
       [agentId]: tools
     }
+    await persist({ assistantToolDefaults: assistantToolDefaults.value })
   }
 
   async function setSavedModels(models: string[]) {

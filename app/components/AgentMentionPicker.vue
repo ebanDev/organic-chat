@@ -15,7 +15,7 @@ interface MentionCommandItem {
 
 interface AgentMentionPickerProps {
   modelValue: string
-  agents: AgentOption[]
+  agents?: AgentOption[]
   agentValue?: string
   disabled?: boolean
 }
@@ -27,8 +27,7 @@ const props = withDefaults(defineProps<AgentMentionPickerProps>(), {
 })
 
 const emit = defineEmits<{
-  (event: 'update:modelValue', value: string): void
-  (event: 'update:agentValue', value: string): void
+  (event: 'update:modelValue' | 'update:agentValue', value: string): void
   (event: 'requestFocus'): void
 }>()
 

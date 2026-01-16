@@ -23,6 +23,7 @@ export interface Message {
   conversationId: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  parts?: unknown[]
   createdAt: number
 }
 

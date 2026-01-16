@@ -10,7 +10,7 @@ interface QuickPickerItem {
 
 interface QuickPickerProps {
   open: boolean
-  items: QuickPickerItem[]
+  items?: QuickPickerItem[]
   emptyLabel?: string
 }
 

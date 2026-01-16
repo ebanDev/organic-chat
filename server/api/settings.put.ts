@@ -7,6 +7,7 @@ interface UpdateSettingsBody {
   taskModel?: string | null
   defaultAgentId?: string | null
   savedModels?: string[]
+  assistantToolDefaults?: Record<string, string[]>
 }
 
 const UPSERT_SQL = `
@@ -39,6 +40,23 @@ export default defineEventHandler(async (event) => {
       ? body.savedModels.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
       : []
     updates.push(['saved_models', JSON.stringify(Array.from(new Set(clean)))])
+  }
+  if ('assistantToolDefaults' in body) {
+    const raw = body.assistantToolDefaults
+    let safe: Record<string, string[]> = {}
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      safe = Object.fromEntries(
+        Object.entries(raw)
+          .filter(([key, value]) => typeof key === 'string' && Array.isArray(value))
+          .map(([key, value]) => [
+            key,
+            Array.from(new Set(
+              value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+            ))
+          ])
+      )
+    }
+    updates.push(['assistant_tool_defaults', JSON.stringify(safe)])
   }
 
   if (!updates.length) {

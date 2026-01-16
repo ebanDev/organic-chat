@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
+import { nextTick } from 'vue'
 import { Chat } from '@ai-sdk/vue'
 import { DefaultChatTransport, getToolName, isToolUIPart, type UIMessage } from 'ai'
 import StreamMarkdown from '~/components/markdown/StreamMarkdown.vue'
@@ -33,6 +34,28 @@ let streamQueued = false
 let lastStreamRender = 0
 const optimisticMessage = ref<UIMessage | null>(null)
 const pendingHydrationId = ref<string | null>(null)
+const composerRef = ref<{ focusPromptInput?: () => void } | null>(null)
+const imagePreviewOpen = ref(false)
+const imagePreviewUrl = ref('')
+const imagePreviewAlt = ref('Image preview')
+
+const editingMessageIndex = computed(() => {
+  if (!isEditingMessage.value || !editingMessageId.value) return -1
+  return displayMessages.value.findIndex(message => message.id === editingMessageId.value)
+})
+
+const decoratedMessages = computed<UIMessage[]>(() => {
+  const index = editingMessageIndex.value
+  if (index === -1) return displayMessages.value
+  return displayMessages.value.map((message, messageIndex) => {
+    if (messageIndex <= index) return message
+    const existingClass = (message as { class?: string }).class
+    return {
+      ...message,
+      class: [existingClass, 'opacity-50'].filter(Boolean).join(' ')
+    }
+  })
+})
 
 interface DocumentAttachment {
   name: string
@@ -287,16 +310,27 @@ async function restartMessage(message: UIMessage) {
     return
   }
 
+  const files: File[] = []
+  target.parts.forEach((part) => {
+    if (part.type !== 'file') return
+    if (!part.url || !part.url.startsWith('data:')) return
+    const name = part.filename || 'attachment'
+    const file = dataUrlToFile(part.url, name, part.mediaType)
+    if (file) {
+      files.push(file)
+    }
+  })
+
   const cutIndex = chat.messages.findIndex(item => item.id === target?.id)
   if (cutIndex >= 0) {
-    chat.messages = chat.messages.slice(0, cutIndex + 1)
+    chat.messages = chat.messages.slice(0, cutIndex)
   }
 
   if (activeConversation.value?.messages) {
     const trimmed = activeConversation.value.messages.slice()
     const dbIndex = trimmed.findIndex(msg => msg.id === target?.id)
     if (dbIndex >= 0) {
-      trimmed.splice(dbIndex + 1)
+      trimmed.splice(dbIndex)
       activeConversation.value = {
         ...activeConversation.value,
         messages: trimmed
@@ -308,7 +342,11 @@ async function restartMessage(message: UIMessage) {
     await $fetch(`/api/messages/${target.id}`, { method: 'DELETE' })
   }
 
-  await chat.sendMessage({ text })
+  if (files.length) {
+    await chat.sendMessage({ text, files: toFileList(files) })
+  } else {
+    await chat.sendMessage({ text })
+  }
 }
 
 function showMessageInfo(message: UIMessage) {
@@ -329,11 +367,18 @@ function openEditMessage(message: UIMessage) {
     return
   }
   const extracted = extractAllAttachments(rawText)
+  const files: File[] = []
+  message.parts.forEach((part) => {
+    if (part.type !== 'file') return
+    if (!part.url || !part.url.startsWith('data:')) return
+    const name = part.filename || 'attachment'
+    const file = dataUrlToFile(part.url, name, part.mediaType)
+    if (file) {
+      files.push(file)
+    }
+  })
   editingMessageId.value = message.id
   editingMessageText.value = extracted.text
-
-  // Convert attachments back to File objects
-  const files: File[] = []
 
   // Convert document attachments to files
   extracted.documentAttachments.forEach((doc) => {
@@ -364,6 +409,7 @@ function openEditMessage(message: UIMessage) {
 
   editingMessageFiles.value = files
   isEditingMessage.value = true
+  nextTick(() => composerRef.value?.focusPromptInput?.())
 }
 
 function cancelEditMessage() {
@@ -541,7 +587,7 @@ async function ensureValidConversationModel() {
 const activeTools = computed({
   get: () => conversationsStore.getTools(
     conversationId.value,
-    settingsStore.getAssistantToolDefaults(agentsStore.active?.id ?? null)
+    settingsStore.getAssistantToolDefaults(activeConversation.value?.agentId ?? null)
   ),
   set: (value) => {
     conversationsStore.setTools(conversationId.value, value)
@@ -697,6 +743,12 @@ function formatJson(value: unknown): string {
   }
 }
 
+function openImagePreview(url: string, alt = 'Image preview') {
+  imagePreviewUrl.value = url
+  imagePreviewAlt.value = alt
+  imagePreviewOpen.value = true
+}
+
 function toolIcon(type: RenderBlock['type']): string {
   switch (type) {
     case 'tool-call':
@@ -806,17 +858,27 @@ function formatDocumentBlock(name: string, content: string): string {
   return `<<<DOC name="${name}">>>\n${content}\n<<<ENDDOC>>>`
 }
 
-function formatImageBlock(name: string, dataUrl: string): string {
-  return `<<<IMG name="${name}">>>\n${dataUrl}\n<<<ENDIMG>>>`
+function dataUrlToFile(dataUrl: string, name: string, fallbackType?: string): File | null {
+  try {
+    const [header, data] = dataUrl.split(',')
+    if (!header || !data) return null
+    const mimeMatch = header.match(/:(.*?);/)
+    const mime = mimeMatch?.[1] || fallbackType || 'application/octet-stream'
+    const binary = atob(data)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    return new File([bytes], name, { type: mime })
+  } catch {
+    return null
+  }
 }
 
-async function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
+function toFileList(files: File[]): FileList {
+  const dataTransfer = new DataTransfer()
+  files.forEach(file => dataTransfer.items.add(file))
+  return dataTransfer.files
 }
 
 async function buildDocumentsMessage(files: File[]): Promise<string> {
@@ -837,6 +899,7 @@ async function buildDocumentsMessage(files: File[]): Promise<string> {
 
 interface PreparedMessagePayload {
   text: string
+  files?: File[]
 }
 
 async function prepareMessagePayload(payload: { text?: string, files?: FileList | File[] | null }): Promise<PreparedMessagePayload> {
@@ -848,27 +911,22 @@ async function prepareMessagePayload(payload: { text?: string, files?: FileList 
   // Build document blocks
   const documentMessage = documentFiles.length ? await buildDocumentsMessage(documentFiles) : ''
 
-  // Build image blocks with data URLs
-  const imageBlocks: string[] = []
-  for (const file of imageFiles) {
-    try {
-      const dataUrl = await fileToDataUrl(file)
-      imageBlocks.push(formatImageBlock(file.name, dataUrl))
-    } catch (_error) {
-      const message = _error instanceof Error ? _error.message : 'Failed to encode image'
-      toast.add({ title: 'Image encoding failed', description: `${file.name}: ${message}`, color: 'error' })
-    }
-  }
-  const imageMessage = imageBlocks.join('\n\n')
-
-  const combinedText = [text, documentMessage, imageMessage].filter(Boolean).join('\n\n')
-
   return {
-    text: combinedText
+    text: [text, documentMessage].filter(Boolean).join('\n\n'),
+    files: imageFiles.length ? imageFiles : undefined
   }
 }
 
 async function sendWithAttachments(payload: PreparedMessagePayload) {
+  if (payload.files?.length) {
+    const files = toFileList(payload.files)
+    if (payload.text) {
+      await chat.sendMessage({ text: payload.text, files })
+      return
+    }
+    await chat.sendMessage({ files })
+    return
+  }
   if (payload.text) {
     await chat.sendMessage({ text: payload.text })
   }
@@ -1011,10 +1069,11 @@ async function initializeConversation(id: string) {
     const webAvailable = tools.value.some(tool =>
       tool.type === 'web_navigate' && tool.enabled
     )
-    const defaults = settingsStore.getAssistantToolDefaults(agentsStore.active?.id ?? null).filter(type =>
+    const defaults = settingsStore.getAssistantToolDefaults(activeConversation.value?.agentId ?? null)
+    const filtered = defaults.filter(type =>
       type === 'web_navigate' && webAvailable
     )
-    conversationsStore.setTools(id, defaults)
+    conversationsStore.setTools(id, filtered)
   }
 
   const pending = pendingMessage.value
@@ -1065,7 +1124,9 @@ watch(() => activeConversation.value, (conv) => {
   chat.messages = conv.messages.map(m => ({
     id: m.id,
     role: m.role,
-    parts: [{ type: 'text' as const, text: m.content }]
+    parts: Array.isArray(m.parts) && m.parts.length
+      ? (m.parts as UIMessage['parts'])
+      : [{ type: 'text' as const, text: m.content }]
   }))
   pendingHydrationId.value = null
   refreshDisplayMessages()
@@ -1131,7 +1192,7 @@ watch(
             </p>
           </div>
           <UChatMessages
-            :messages="displayMessages"
+            :messages="decoratedMessages"
             :status="chat.status"
             :user="{ side: 'right', variant: 'soft', actions: messageActions }"
             :assistant="{ side: 'left', variant: 'naked', actions: messageActions }"
@@ -1149,11 +1210,23 @@ watch(
                     :is-streaming="block.isStreaming"
                     :cache-key="`${message.id}-${index}-reasoning`"
                   />
+                  <UButton
+                    v-else-if="block.type === 'file' && block.mediaType?.startsWith('image/')"
+                    variant="ghost"
+                    color="neutral"
+                    class="p-0"
+                    @click="openImagePreview(block.url)"
+                  >
+                    <UAvatar
+                      size="3xl"
+                      :src="block.url"
+                      class="border border-default rounded-lg"
+                    />
+                  </UButton>
                   <UAvatar
                     v-else-if="block.type === 'file'"
                     size="3xl"
-                    :src="block.mediaType?.startsWith('image/') ? block.url : undefined"
-                    :icon="block.mediaType?.startsWith('image/') ? undefined : 'ph:file-bold'"
+                    icon="ph:file-bold"
                     class="border border-default rounded-lg"
                   />
                   <UButton
@@ -1243,6 +1316,7 @@ watch(
       <template #footer>
         <UContainer class="pb-4 sm:pb-6">
           <ChatComposer
+            ref="composerRef"
             v-model="selectedModel"
             v-model:agent-value="selectedAgentId"
             v-model:active-tools="activeTools"
@@ -1272,6 +1346,23 @@ watch(
             </h2>
           </template>
           <pre class="text-sm whitespace-pre-wrap">{{ documentPreviewContent }}</pre>
+        </UCard>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="imagePreviewOpen">
+      <template #content>
+        <UCard>
+          <template #header>
+            <h2 class="text-lg font-semibold">
+              {{ imagePreviewAlt }}
+            </h2>
+          </template>
+          <img
+            :src="imagePreviewUrl"
+            :alt="imagePreviewAlt"
+            class="max-h-[70vh] w-full object-contain rounded-md"
+          >
         </UCard>
       </template>
     </UModal>

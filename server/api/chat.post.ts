@@ -49,6 +49,15 @@ function applyPromptVariables(prompt: string, timeZone?: string | null): string 
   return prompt.replaceAll('{{CURRENT_DATETIME}}', current)
 }
 
+function getTextFromParts(parts: UIMessage['parts']): string {
+  return parts
+    .filter(part => part.type === 'text')
+    .map(part => ('text' in part ? part.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
 export default defineEventHandler(async (event) => {
   console.info('[chat] incoming request', { path: event.path })
   const body = await readBody<ChatBody>(event)
@@ -133,17 +142,18 @@ export default defineEventHandler(async (event) => {
     const textPart = lastUserMessage.parts.find(part => part.type === 'text')
     if (textPart && 'text' in textPart && textPart.text) {
       lastUserText = textPart.text
-      const messageId = lastUserMessage.id || nanoid()
-      const existingMsg = await query(
-        'SELECT id FROM messages WHERE id = ?'
-      ).get<{ id: string }>(messageId)
+    }
+    const messageId = lastUserMessage.id || nanoid()
+    const existingMsg = await query(
+      'SELECT id FROM messages WHERE id = ?'
+    ).get<{ id: string }>(messageId)
 
-      if (!existingMsg) {
-        await run(
-          'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
-          [messageId, body.conversationId, 'user', textPart.text, Date.now()]
-        )
-      }
+    if (!existingMsg) {
+      const partsJson = JSON.stringify(lastUserMessage.parts ?? [])
+      await run(
+        'INSERT INTO messages (id, conversation_id, role, content, parts_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [messageId, body.conversationId, 'user', lastUserText, partsJson, Date.now()]
+      )
     }
   }
 
@@ -217,13 +227,6 @@ export default defineEventHandler(async (event) => {
         }
       },
       onFinish: async ({ text }) => {
-        if (text?.trim()) {
-          await run(
-            'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
-            [nanoid(), body.conversationId, 'assistant', text, Date.now()]
-          )
-        }
-
         await run(
           'UPDATE conversations SET updated_at = ? WHERE id = ?',
           [Date.now(), body.conversationId]
@@ -319,6 +322,21 @@ export default defineEventHandler(async (event) => {
     })
 
     const stream = createUIMessageStream<UIMessage>({
+      originalMessages: body.messages,
+      onFinish: async ({ responseMessage, isAborted }) => {
+        if (isAborted || responseMessage.role !== 'assistant') return
+        const messageId = responseMessage.id || nanoid()
+        const existing = await query(
+          'SELECT id FROM messages WHERE id = ?'
+        ).get<{ id: string }>(messageId)
+        if (existing) return
+        const parts = responseMessage.parts ?? []
+        const content = getTextFromParts(parts)
+        await run(
+          'INSERT INTO messages (id, conversation_id, role, content, parts_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+          [messageId, body.conversationId, 'assistant', content, JSON.stringify(parts), Date.now()]
+        )
+      },
       execute: ({ writer }) => {
         uiWriter = writer
         if (memoryNoticePayload && !memoryNoticeSent && uiWriter) {

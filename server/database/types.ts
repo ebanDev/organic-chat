@@ -14,6 +14,7 @@ export interface Message {
   conversationId: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  parts?: unknown[]
   createdAt: number
 }
 
@@ -116,6 +117,7 @@ export interface MessageRow {
   conversation_id: string
   role: string
   content: string
+  parts_json: string | null
   created_at: number
 }
 
@@ -211,11 +213,23 @@ export function rowToAgent(row: AgentRow): Agent {
 }
 
 export function rowToMessage(row: MessageRow): Message {
+  let parts: unknown[] | undefined
+  if (row.parts_json) {
+    try {
+      const parsed = JSON.parse(row.parts_json)
+      if (Array.isArray(parsed)) {
+        parts = parsed
+      }
+    } catch {
+      parts = undefined
+    }
+  }
   return {
     id: row.id,
     conversationId: row.conversation_id,
     role: row.role as Message['role'],
     content: row.content,
+    parts,
     createdAt: row.created_at
   }
 }

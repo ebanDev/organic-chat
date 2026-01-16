@@ -43,6 +43,37 @@ export const useFoldersStore = defineStore('folders', () => {
     }
   }
 
+  async function update(id: string, data: Partial<Pick<Folder, 'name'>>) {
+    const existing = folders.value.find(folder => folder.id === id)
+    if (!existing) return
+    const nextName = data.name?.trim() ?? existing.name
+    const index = folders.value.findIndex(folder => folder.id === id)
+    const next: Folder = {
+      ...existing,
+      name: nextName,
+      updatedAt: Date.now()
+    }
+    if (index !== -1) {
+      folders.value.splice(index, 1, next)
+    }
+    try {
+      const saved = await $fetch<Folder>(`/api/folders/${id}`, {
+        method: 'PUT',
+        body: { name: nextName }
+      })
+      const savedIndex = folders.value.findIndex(folder => folder.id === id)
+      if (savedIndex !== -1) {
+        folders.value.splice(savedIndex, 1, saved)
+      }
+    } catch (error) {
+      const rollbackIndex = folders.value.findIndex(folder => folder.id === id)
+      if (rollbackIndex !== -1) {
+        folders.value.splice(rollbackIndex, 1, existing)
+      }
+      throw error
+    }
+  }
+
   async function remove(id: string, action: 'keep_chats' | 'delete_chats' = 'keep_chats') {
     const existing = folders.value.find(folder => folder.id === id)
     folders.value = folders.value.filter(folder => folder.id !== id)
@@ -58,7 +89,7 @@ export const useFoldersStore = defineStore('folders', () => {
     }
   }
 
-  return { folders, loading, load, create, remove }
+  return { folders, loading, load, create, update, remove }
 }, {
   persist: true
 })

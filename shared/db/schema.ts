@@ -59,6 +59,7 @@ export const baseSchemaSql = `
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
+    parts_json TEXT DEFAULT NULL,
     created_at INTEGER NOT NULL DEFAULT 0
   );
 

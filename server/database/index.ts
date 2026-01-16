@@ -111,6 +111,12 @@ if (!hasMemoryApiKey) {
   db.exec(`ALTER TABLE memory_settings ADD COLUMN api_key TEXT NOT NULL DEFAULT ''`)
 }
 
+const messageColumns = query('PRAGMA table_info(messages)').all<{ name: string }>()
+const hasMessageParts = messageColumns.some(column => column.name === 'parts_json')
+if (!hasMessageParts) {
+  db.exec(`ALTER TABLE messages ADD COLUMN parts_json TEXT DEFAULT NULL`)
+}
+
 const hasMemoryKeysTable = query(
   `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_keys'`
 ).get<{ name: string }>()

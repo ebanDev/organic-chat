@@ -116,6 +116,13 @@ export default defineAppConfig({
           'opacity-100 sm:opacity-0 sm:group-hover/message:opacity-100 absolute bottom-0 flex items-center',
           'transition-opacity'
         ]
+      },
+      variants: {
+        side: {
+          right: {
+            container: 'ltr:justify-end ms-auto max-w-[90%] sm:max-w-[75%]'
+          }
+        }
       }
     },
     textarea: {

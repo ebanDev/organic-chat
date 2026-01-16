@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
-import type { Conversation } from '~/types'
+import type { Conversation, Folder } from '~/types'
 
 const conversationsStore = useConversationsStore()
 const foldersStore = useFoldersStore()
@@ -76,6 +76,25 @@ async function deleteConversation(id: string) {
   }
 }
 
+function startRenameConversation(id: string) {
+  const conversation = conversations.value.find(item => item.id === id)
+  if (!conversation) return
+  renameConversationId.value = id
+  renameConversationTitle.value = conversation.title || ''
+  renameConversationOpen.value = true
+}
+
+async function renameConversation() {
+  if (!renameConversationId.value) return
+  const title = renameConversationTitle.value.trim()
+  try {
+    await conversationsStore.update(renameConversationId.value, { title: title || null })
+    resetRenameConversation()
+  } catch {
+    toast.add({ title: 'Failed to rename conversation', color: 'error' })
+  }
+}
+
 async function moveConversation(id: string, folderId: string | null) {
   try {
     await conversationsStore.update(id, { folderId })
@@ -115,6 +134,12 @@ const deleteFolderOpen = ref(false)
 const deleteFolderId = ref<string | null>(null)
 const deleteFolderName = ref('')
 const deleteFolderCount = ref(0)
+const renameFolderOpen = ref(false)
+const renameFolderId = ref<string | null>(null)
+const renameFolderName = ref('')
+const renameConversationOpen = ref(false)
+const renameConversationId = ref<string | null>(null)
+const renameConversationTitle = ref('')
 
 async function runSearch(term: string) {
   searching.value = true
@@ -165,8 +190,25 @@ function buildMenuItems(conversations: Conversation[]): ChatMenuItem[] {
   }))
 }
 
+function getSidebarFolderLimit(folderId: string): number {
+  return sidebarFolderLimits.value[folderId] ?? SIDEBAR_PAGE_SIZE
+}
+
+function getLimitedFolderMenuItems(folderId: string) {
+  return getFolderMenuItems(folderId).slice(0, getSidebarFolderLimit(folderId))
+}
+
+function increaseSidebarLimits() {
+  sidebarUnfiledLimit.value += SIDEBAR_PAGE_SIZE
+  const next: Record<string, number> = { ...sidebarFolderLimits.value }
+  folders.value.forEach((folder) => {
+    next[folder.id] = (next[folder.id] ?? SIDEBAR_PAGE_SIZE) + SIDEBAR_PAGE_SIZE
+  })
+  sidebarFolderLimits.value = next
+}
+
 const unfiledMenuItems = computed<ChatMenuItem[]>(() =>
-  buildMenuItems(unfiledConversations.value)
+  buildMenuItems(unfiledConversations.value).slice(0, sidebarUnfiledLimit.value)
 )
 
 function getFolderConversationCount(folderId: string): number {
@@ -204,6 +246,39 @@ async function deleteFolderAndChats() {
   await conversationsStore.load()
 }
 
+function startRenameFolder(folder: Folder) {
+  renameFolderId.value = folder.id
+  renameFolderName.value = folder.name
+  renameFolderOpen.value = true
+}
+
+async function renameFolder() {
+  if (!renameFolderId.value) return
+  const name = renameFolderName.value.trim()
+  if (!name) {
+    toast.add({ title: 'Folder name is required', color: 'error' })
+    return
+  }
+  try {
+    await foldersStore.update(renameFolderId.value, { name })
+    resetRenameFolder()
+  } catch {
+    toast.add({ title: 'Failed to rename folder', color: 'error' })
+  }
+}
+
+function resetRenameFolder() {
+  renameFolderOpen.value = false
+  renameFolderId.value = null
+  renameFolderName.value = ''
+}
+
+function resetRenameConversation() {
+  renameConversationOpen.value = false
+  renameConversationId.value = null
+  renameConversationTitle.value = ''
+}
+
 const appMenuItems = computed<NavigationMenuItem[]>(() =>
   apps.value.map(app => ({
     label: app.name,
@@ -213,9 +288,20 @@ const appMenuItems = computed<NavigationMenuItem[]>(() =>
 )
 
 const drawerRef = ref<HTMLElement | null>(null)
+const sidebarRef = ref<{ $el?: HTMLElement } | null>(null)
 const drawerOpen = ref(false)
 const drawerWidth = ref(0)
 const drawerTranslate = ref(-999)
+const sidebarSentinel = ref<HTMLElement | null>(null)
+const SIDEBAR_PAGE_SIZE = 20
+const sidebarUnfiledLimit = ref(SIDEBAR_PAGE_SIZE)
+const sidebarFolderLimits = ref<Record<string, number>>({})
+const sidebarHasScrolled = ref(false)
+let sidebarObserver: IntersectionObserver | null = null
+let sidebarScrollEl: HTMLElement | null = null
+const onSidebarScroll = () => {
+  sidebarHasScrolled.value = true
+}
 const tracking = ref(false)
 const dragging = ref(false)
 const dragStartX = ref(0)
@@ -318,6 +404,24 @@ onMounted(() => {
   window.addEventListener('touchstart', onTouchStart, { passive: true })
   window.addEventListener('touchmove', onTouchMove, { passive: false })
   window.addEventListener('touchend', onTouchEnd, { passive: true })
+  if (typeof IntersectionObserver !== 'undefined') {
+    const candidate = sidebarRef.value?.$el
+    sidebarScrollEl = candidate instanceof Element ? candidate : null
+    if (sidebarScrollEl) {
+      sidebarScrollEl.addEventListener('scroll', onSidebarScroll, { passive: true })
+    }
+    const observerRoot = sidebarScrollEl instanceof Element ? sidebarScrollEl : null
+    sidebarObserver = new IntersectionObserver((entries) => {
+      const reached = entries.some(entry => entry.isIntersecting)
+      const canLoad = sidebarHasScrolled.value || (sidebarScrollEl ? sidebarScrollEl.scrollTop > 0 : false)
+      if (reached && canLoad) {
+        increaseSidebarLimits()
+      }
+    }, { root: observerRoot, rootMargin: '0px', threshold: 0.1 })
+    if (sidebarSentinel.value) {
+      sidebarObserver.observe(sidebarSentinel.value)
+    }
+  }
 })
 
 watch(() => route.path, () => {
@@ -331,6 +435,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('touchstart', onTouchStart)
   window.removeEventListener('touchmove', onTouchMove)
   window.removeEventListener('touchend', onTouchEnd)
+  if (sidebarScrollEl) {
+    sidebarScrollEl.removeEventListener('scroll', onSidebarScroll)
+    sidebarScrollEl = null
+  }
+  sidebarObserver?.disconnect()
+  sidebarObserver = null
 })
 
 function getFolderMenuItems(folderId: string) {
@@ -377,9 +487,17 @@ function getConversationActions(conversationId: string): DropdownMenuItem[][] {
   ]
 
   return [[
+    { label: 'Rename', icon: 'ph:pencil-bold', onSelect: () => startRenameConversation(conversationId) },
     { label: 'Delete', icon: 'ph:trash-bold', onSelect: () => deleteConversation(conversationId) }
   ], [
     { label: 'Move to folder', icon: 'ph:folder-simple-bold', children: folderMoves }
+  ]]
+}
+
+function getFolderActions(folder: Folder): DropdownMenuItem[][] {
+  return [[
+    { label: 'Rename', icon: 'ph:pencil-bold', onSelect: () => startRenameFolder(folder) },
+    { label: 'Delete', icon: 'ph:trash-bold', onSelect: () => confirmDeleteFolder(folder.id) }
   ]]
 }
 
@@ -408,8 +526,18 @@ const searchGroups = computed(() => {
 <template>
   <UApp>
     <UDashboardGroup unit="rem">
+      <UButton
+        v-show="!drawerOpen"
+        icon="ph:list-bold"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        class="fixed left-3 top-3 z-40 lg:hidden"
+        @click="openDrawer"
+      />
       <UDashboardSidebar
         id="main"
+        ref="sidebarRef"
         resizable
         collapsible
         :min-size="12"
@@ -550,14 +678,20 @@ const searchGroups = computed(() => {
                       class="ml-auto"
                     />
                   </UButton>
-                  <UButton
-                    icon="ph:trash-bold"
-                    color="neutral"
-                    variant="ghost"
-                    size="xs"
-                    class="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    @click.stop="confirmDeleteFolder(folder.id)"
-                  />
+                  <UDropdownMenu
+                    :items="getFolderActions(folder)"
+                    :content="{ align: 'end' }"
+                  >
+                    <UButton
+                      icon="ph:dots-three-vertical-bold"
+                      color="neutral"
+                      variant="ghost"
+                      size="xs"
+                      class="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                      tabindex="-1"
+                      @click.stop.prevent
+                    />
+                  </UDropdownMenu>
                 </div>
                 <div
                   v-show="isFolderOpen(folder.id)"
@@ -565,7 +699,7 @@ const searchGroups = computed(() => {
                 >
                   <UNavigationMenu
                     v-if="getFolderMenuItems(folder.id).length"
-                    :items="getFolderMenuItems(folder.id)"
+                    :items="getLimitedFolderMenuItems(folder.id)"
                     orientation="vertical"
                     :ui="{ link: 'overflow-hidden' }"
                   >
@@ -635,6 +769,10 @@ const searchGroups = computed(() => {
           >
             {{ conversations.length ? 'No unfiled chats' : 'No conversations yet' }}
           </p>
+          <div
+            ref="sidebarSentinel"
+            class="h-4"
+          />
         </template>
 
         <template #footer>
@@ -686,6 +824,76 @@ const searchGroups = computed(() => {
                   @click="deleteFolderAndChats"
                 >
                   Delete chats
+                </UButton>
+              </div>
+            </template>
+          </UCard>
+        </template>
+      </UModal>
+
+      <UModal v-model:open="renameFolderOpen">
+        <template #content>
+          <UCard>
+            <template #header>
+              <h2 class="text-lg font-semibold">
+                Rename folder
+              </h2>
+            </template>
+            <UInput
+              v-model="renameFolderName"
+              placeholder="Folder name"
+              @keydown.enter.prevent="renameFolder"
+            />
+            <template #footer>
+              <div class="flex justify-end gap-2">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  @click="resetRenameFolder"
+                >
+                  Cancel
+                </UButton>
+                <UButton
+                  color="neutral"
+                  variant="solid"
+                  @click="renameFolder"
+                >
+                  Save
+                </UButton>
+              </div>
+            </template>
+          </UCard>
+        </template>
+      </UModal>
+
+      <UModal v-model:open="renameConversationOpen">
+        <template #content>
+          <UCard>
+            <template #header>
+              <h2 class="text-lg font-semibold">
+                Rename conversation
+              </h2>
+            </template>
+            <UInput
+              v-model="renameConversationTitle"
+              placeholder="Conversation title"
+              @keydown.enter.prevent="renameConversation"
+            />
+            <template #footer>
+              <div class="flex justify-end gap-2">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  @click="resetRenameConversation"
+                >
+                  Cancel
+                </UButton>
+                <UButton
+                  color="neutral"
+                  variant="solid"
+                  @click="renameConversation"
+                >
+                  Save
                 </UButton>
               </div>
             </template>

@@ -163,6 +163,8 @@ function focusPromptInput() {
   })
 }
 
+defineExpose({ focusPromptInput })
+
 // Initialize input and files when props change
 watch(() => props.initialText, (value) => {
   if (value) {
@@ -196,63 +198,65 @@ watch(() => props.initialFiles, (files) => {
     @paste="onPaste"
   >
     <template #header>
-      <div
-        v-if="isEditing"
-        class="flex items-center justify-between px-3 py-2 bg-primary/10 rounded-lg mb-2"
-      >
-        <div class="flex items-center gap-2">
-          <UIcon
-            name="ph:pencil-bold"
-            class="text-primary"
-          />
-          <span class="text-sm font-medium text-primary">Editing message</span>
-        </div>
-        <UButton
-          icon="ph:x-bold"
-          size="xs"
-          variant="ghost"
-          color="neutral"
-          @click="handleCancel"
-        />
-      </div>
-      <div
-        v-if="selectedFiles.length"
-        class="flex flex-wrap gap-2"
-      >
+      <div class="flex flex-col gap-2 w-full">
         <div
-          v-for="(item, index) in selectedFiles"
-          :key="item.previewUrl || `${item.file.name}-${item.file.lastModified}`"
-          class="relative"
+          v-if="isEditing"
+          class="flex items-center justify-between px-3 py-2 bg-primary/10 rounded-lg w-full"
         >
-          <UAvatar
-            v-if="item.previewUrl"
-            size="3xl"
-            :src="item.previewUrl"
-            :alt="item.file.name"
-            class="border border-default rounded-lg"
-          />
-          <UButton
-            v-else
-            size="sm"
-            variant="soft"
-            color="neutral"
-            class="pointer-events-none max-w-[12rem]"
-          >
+          <div class="flex items-center gap-2">
             <UIcon
-              name="ph:file-bold"
-              class="text-base"
+              name="ph:pencil-bold"
+              class="text-primary"
             />
-            <span class="ml-2 truncate">{{ item.file.name }}</span>
-          </UButton>
+            <span class="text-sm font-medium text-primary">Editing message</span>
+          </div>
           <UButton
             icon="ph:x-bold"
             size="xs"
-            square
+            variant="ghost"
             color="neutral"
-            variant="solid"
-            class="absolute p-0 -top-1 -right-1 rounded-full"
-            @click="removeFile(index)"
+            @click="handleCancel"
           />
+        </div>
+        <div
+          v-if="selectedFiles.length"
+          class="flex flex-wrap gap-2"
+        >
+          <div
+            v-for="(item, index) in selectedFiles"
+            :key="item.previewUrl || `${item.file.name}-${item.file.lastModified}`"
+            class="relative"
+          >
+            <UAvatar
+              v-if="item.previewUrl"
+              size="3xl"
+              :src="item.previewUrl"
+              :alt="item.file.name"
+              class="border border-default rounded-lg"
+            />
+            <UButton
+              v-else
+              size="sm"
+              variant="soft"
+              color="neutral"
+              class="pointer-events-none max-w-[12rem]"
+            >
+              <UIcon
+                name="ph:file-bold"
+                class="text-base"
+              />
+              <span class="ml-2 truncate">{{ item.file.name }}</span>
+            </UButton>
+            <UButton
+              icon="ph:x-bold"
+              size="xs"
+              square
+              color="neutral"
+              variant="solid"
+              class="absolute p-0 -top-1 -right-1 rounded-full"
+              @click="removeFile(index)"
+            />
+          </div>
         </div>
       </div>
       <ObsidianVaultPicker
