@@ -112,7 +112,6 @@ watch(() => props.modelValue, (value) => {
   mentionSearchTerm.value = query.term
   queueRequestFocus()
 })
-
 </script>
 
 <template>

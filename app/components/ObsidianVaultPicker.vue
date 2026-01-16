@@ -188,7 +188,10 @@ const obsidianItems = computed<ObsidianQuickItem[]>(() =>
   >
     <template #content>
       <div class="px-1 py-1">
-        <div v-if="obsidianLoading" class="px-3 py-2 text-xs text-muted">
+        <div
+          v-if="obsidianLoading"
+          class="px-3 py-2 text-xs text-muted"
+        >
           Searching…
         </div>
         <QuickPicker

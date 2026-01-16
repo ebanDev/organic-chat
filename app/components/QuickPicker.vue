@@ -85,7 +85,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="w-full">
-    <div v-if="!items.length" class="px-4 py-3 text-sm text-muted">
+    <div
+      v-if="!items.length"
+      class="px-4 py-3 text-sm text-muted"
+    >
       {{ emptyLabel }}
     </div>
     <div

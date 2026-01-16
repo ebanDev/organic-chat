@@ -437,7 +437,10 @@ const searchGroups = computed(() => {
         </template>
 
         <template #default>
-          <div v-if="appMenuItems.length" class="mt-3">
+          <div
+            v-if="appMenuItems.length"
+            class="mt-3"
+          >
             <div class="flex items-center justify-between px-2">
               <span class="text-xs font-semibold text-muted">Apps</span>
             </div>
@@ -533,13 +536,13 @@ const searchGroups = computed(() => {
                 :key="folder.id"
               >
                 <div class="relative flex items-center group">
-                <UButton
-                  color="neutral"
-                  variant="ghost"
-                  size="md"
-                  class="flex-1 justify-start gap-2 text-sm pr-2 group-hover:pr-8 transition-[padding]"
-                  @click="toggleFolder(folder.id)"
-                >
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="md"
+                    class="flex-1 justify-start gap-2 text-sm pr-2 group-hover:pr-8 transition-[padding]"
+                    @click="toggleFolder(folder.id)"
+                  >
                     <UIcon name="ph:folder-simple-bold" />
                     <span class="truncate">{{ folder.name }}</span>
                     <UIcon
